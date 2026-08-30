@@ -6,13 +6,21 @@ from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
+def clean_env_var(val: str | None) -> str:
+    if not val:
+        return ""
+    return val.strip().strip('"').strip("'")
+
 # 1. Initialize Clients & Local Embedding Model (Runs free on CPU)
 print("Loading embedding model (BAAI/bge-small-en-v1.5)...")
 embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
+raw_qdrant_url = clean_env_var(os.getenv("QDRANT_URL", ""))
+qdrant_api_key = clean_env_var(os.getenv("QDRANT_API_KEY", ""))
+
 qdrant_client = QdrantClient(
-    url=os.getenv("QDRANT_URL"),
-    api_key=os.getenv("QDRANT_API_KEY")
+    url=raw_qdrant_url,
+    api_key=qdrant_api_key if qdrant_api_key else None
 )
 
 COLLECTION_NAME = "demo_collection"
@@ -51,4 +59,4 @@ qdrant_client.upsert(
     points=points
 )
 
-print("✅ Successfully embedded and stored 3 sample documents in Qdrant!")
+print("Successfully embedded and stored 3 sample documents in Qdrant!")

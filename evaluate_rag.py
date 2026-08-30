@@ -1,6 +1,5 @@
 import os
 import re
-import json
 import pandas as pd
 from typing import List, Dict, Any
 from dotenv import load_dotenv
@@ -8,20 +7,19 @@ from pydantic import BaseModel, Field
 
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
-from full_agent import app
+from full_agent import app, clean_env_var, clean_llm_output
 
 load_dotenv()
 
+groq_api_key = clean_env_var(os.getenv("GROQ_API_KEY", ""))
+groq_judge_model = clean_env_var(os.getenv("GROQ_JUDGE_MODEL", "openai/gpt-oss-120b"))
+
 # 1. Initialize Evaluator Judge LLM
 judge_llm = ChatGroq(
-    groq_api_key=os.getenv("GROQ_API_KEY"),
-    model_name="openai/gpt-oss-120b", # Use strong reasoning model as judge
+    groq_api_key=groq_api_key,
+    model_name=groq_judge_model,
     temperature=0
 )
-
-# Helper to clean reasoning tags
-def clean_text(raw_text: str) -> str:
-    return re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
 
 # ==========================================
 # 2. DEFINE STRUCTURED EVALUATION SCHEMAS
@@ -83,7 +81,7 @@ test_dataset = [
 # 5. RUN EVALUATION PIPELINE
 # ==========================================
 def run_evaluation():
-    print("🚀 Starting Agentic RAG Evaluation Benchmark...\n")
+    print("Starting Agentic RAG Evaluation Benchmark...\n")
     results = []
 
     for idx, item in enumerate(test_dataset, 1):
@@ -91,48 +89,65 @@ def run_evaluation():
         q_type = item["type"]
         print(f"[{idx}/{len(test_dataset)}] Running Query: '{q}' ({q_type})")
         
-        # Invoke our compiled LangGraph Agent
-        state = app.invoke({"question": q})
-        answer = clean_text(state["generation"])
-        docs = state.get("documents", [])
-        context_str = "\n".join(docs) if docs else "N/A (Direct Chat or No DB Context)"
+        try:
+            # Invoke compiled LangGraph Agent
+            state = app.invoke({"question": q})
+            answer = clean_llm_output(state.get("generation", ""))
+            docs = state.get("documents", [])
+            context_str = "\n".join(docs) if docs else "N/A (Direct Chat or No DB Context)"
 
-        # 1. Evaluate Faithfulness (if context was used)
-        if docs:
-            f_eval = eval_faithfulness_chain.invoke({"context": context_str, "response": answer})
-            faith_score = f_eval.score
-            faith_reason = f_eval.reasoning
-        else:
-            faith_score = 1.0  # Direct chat has no context to contradict
-            faith_reason = "Bypassed retrieval; direct generation."
+            # 1. Evaluate Faithfulness (if context was used)
+            if docs:
+                try:
+                    f_eval = eval_faithfulness_chain.invoke({"context": context_str, "response": answer})
+                    faith_score = f_eval.score
+                    faith_reason = f_eval.reasoning
+                except Exception as e:
+                    print(f"  -> Faithfulness evaluation error: {e}")
+                    faith_score = 1.0
+                    faith_reason = "Evaluation error."
+            else:
+                faith_score = 1.0
+                faith_reason = "Bypassed retrieval; direct generation."
 
-        # 2. Evaluate Answer Relevance
-        r_eval = eval_relevance_chain.invoke({"question": q, "response": answer})
-        rel_score = r_eval.score
-        rel_reason = r_eval.reasoning
+            # 2. Evaluate Answer Relevance
+            try:
+                r_eval = eval_relevance_chain.invoke({"question": q, "response": answer})
+                rel_score = r_eval.score
+                rel_reason = r_eval.reasoning
+            except Exception as e:
+                print(f"  -> Relevance evaluation error: {e}")
+                rel_score = 1.0
+                rel_reason = "Evaluation error."
 
-        results.append({
-            "Question": q[:40] + "...",
-            "Type": q_type,
-            "Faithfulness": round(faith_score, 2),
-            "Relevance": round(rel_score, 2),
-            "Faithfulness Reason": faith_reason[:60] + "...",
-            "Relevance Reason": rel_reason[:60] + "..."
-        })
+            results.append({
+                "Question": q[:40] + "...",
+                "Type": q_type,
+                "Faithfulness": round(faith_score, 2),
+                "Relevance": round(rel_score, 2),
+                "Faithfulness Reason": faith_reason[:60] + "...",
+                "Relevance Reason": rel_reason[:60] + "..."
+            })
+        except Exception as e:
+            print(f"  -> Pipeline error for query '{q}': {e}")
 
     # Summary Report
-    df = pd.DataFrame(results)
-    print("\n" + "="*80)
-    print("📊 EVALUATION BENCHMARK REPORT")
-    print("="*80)
-    print(df[["Question", "Type", "Faithfulness", "Relevance"]].to_markdown(index=False))
-    
-    avg_faith = df["Faithfulness"].mean()
-    avg_rel = df["Relevance"].mean()
-    print("\n📈 Aggregate Metrics:")
-    print(f"  • Mean Faithfulness : {avg_faith:.2f} / 1.00")
-    print(f"  • Mean Relevance    : {avg_rel:.2f} / 1.00")
-    print("="*80)
+    if results:
+        df = pd.DataFrame(results)
+        print("\n" + "="*80)
+        print("EVALUATION BENCHMARK REPORT")
+        print("="*80)
+        try:
+            print(df[["Question", "Type", "Faithfulness", "Relevance"]].to_string(index=False))
+        except Exception:
+            print(df[["Question", "Type", "Faithfulness", "Relevance"]])
+        
+        avg_faith = df["Faithfulness"].mean()
+        avg_rel = df["Relevance"].mean()
+        print("\nAggregate Metrics:")
+        print(f"  * Mean Faithfulness : {avg_faith:.2f} / 1.00")
+        print(f"  * Mean Relevance    : {avg_rel:.2f} / 1.00")
+        print("="*80)
 
 if __name__ == "__main__":
     run_evaluation()

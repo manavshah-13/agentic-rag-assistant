@@ -6,10 +6,18 @@ from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
+def clean_env_var(val: str | None) -> str:
+    if not val:
+        return ""
+    return val.strip().strip('"').strip("'")
+
 embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
+raw_qdrant_url = clean_env_var(os.getenv("QDRANT_URL", ""))
+qdrant_api_key = clean_env_var(os.getenv("QDRANT_API_KEY", ""))
+
 qdrant_client = QdrantClient(
-    url=os.getenv("QDRANT_URL"),
-    api_key=os.getenv("QDRANT_API_KEY")
+    url=raw_qdrant_url,
+    api_key=qdrant_api_key if qdrant_api_key else None
 )
 
 COLLECTION_NAME = "demo_collection"
@@ -37,4 +45,4 @@ points = [
 ]
 
 qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
-print("✅ Ingested 5 technical documents into Qdrant for reranker testing.")
+print("Ingested 5 technical documents into Qdrant for reranker testing.")

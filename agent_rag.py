@@ -1,5 +1,5 @@
 import os
-from typing import Literal, TypedDict
+from typing import Literal
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
@@ -9,15 +9,25 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
+def clean_env_var(val: str | None) -> str:
+    if not val:
+        return ""
+    return val.strip().strip('"').strip("'")
+
+groq_api_key = clean_env_var(os.getenv("GROQ_API_KEY", ""))
+groq_model = clean_env_var(os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"))
+raw_qdrant_url = clean_env_var(os.getenv("QDRANT_URL", ""))
+qdrant_api_key = clean_env_var(os.getenv("QDRANT_API_KEY", ""))
+
 # 1. Initialize Clients & Models
 embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
 qdrant_client = QdrantClient(
-    url=os.getenv("QDRANT_URL"),
-    api_key=os.getenv("QDRANT_API_KEY")
+    url=raw_qdrant_url,
+    api_key=qdrant_api_key if qdrant_api_key else None
 )
 llm = ChatGroq(
-    groq_api_key=os.getenv("GROQ_API_KEY"),
-    model_name="llama-3.3-70b-versatile",
+    groq_api_key=groq_api_key,
+    model_name=groq_model,
     temperature=0
 )
 
@@ -50,5 +60,5 @@ test_q2 = "What is the capital of France?"
 res1 = question_router.invoke({"question": test_q1})
 res2 = question_router.invoke({"question": test_q2})
 
-print(f"❓ Question: '{test_q1}' --> 🧠 Routed to: {res1.datasource}")
-print(f"❓ Question: '{test_q2}' --> 🧠 Routed to: {res2.datasource}")
+print(f"Question: '{test_q1}' --> Routed to: {res1.datasource}")
+print(f"Question: '{test_q2}' --> Routed to: {res2.datasource}")
